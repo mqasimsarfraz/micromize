@@ -5,35 +5,16 @@
 
 #include <vmlinux.h>
 
+#include <gadget/buffer.h>
 #include <gadget/filter.h>
+#include <gadget/macros.h>
 
-SEC("lsm/kernel_load_data")
-int BPF_PROG(micromize_kernel_load_data, enum kernel_load_data_id id,
-             bool contents) {
-  if (gadget_should_discard_data_current()) {
-    return 0;
-  }
+const volatile bool enforce = true;
+GADGET_PARAM(enforce);
 
-  // Block kernel module loading
-  if (id == LOADING_MODULE) {
-    return -EPERM;
-  }
+GADGET_TRACER_MAP(events, 1024 * 256);
 
-  return 0;
-}
-
-SEC("lsm/kernel_read_file")
-int BPF_PROG(micromize_kernel_read_file, struct file *file,
-             enum kernel_read_file_id id, bool contents) {
-  if (gadget_should_discard_data_current())
-    return 0;
-
-  if (id == READING_MODULE) {
-    return -EPERM;
-  }
-
-  return 0;
-}
+GADGET_TRACER(kmod_restrict, events, event);
 
 SEC("lsm/capable")
 int BPF_PROG(micromize_capable, const struct cred *cred,
@@ -42,8 +23,19 @@ int BPF_PROG(micromize_capable, const struct cred *cred,
     return 0;
 
   if (cap == CAP_SYS_MODULE) {
-    bpf_printk("capable: blocking CAP_SYS_MODULE (loading/unloading)\n");
-    return -EPERM;
+    struct event *event;
+    event = gadget_reserve_buf(&events, sizeof(*event));
+    if (!event)
+      return 0;
+
+    gadget_process_populate(&event->process);
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+
+    gadget_submit_buf(ctx, &events, event, sizeof(*event));
+
+    if (enforce) {
+      return -EPERM;
+    }
   }
 
   return 0;
