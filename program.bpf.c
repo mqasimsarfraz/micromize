@@ -69,4 +69,18 @@ int BPF_PROG(micromize_kernel_read_file, struct file *file, enum kernel_read_fil
   return 0;
 }
 
+SEC("lsm/capable")
+int BPF_PROG(micromize_capable, const struct cred *cred, struct user_namespace *ns, int cap, unsigned int opts)
+{
+  if (gadget_should_discard_data_current())
+    return 0;
+
+  if (cap == CAP_SYS_MODULE) {
+    bpf_printk("capable: blocking CAP_SYS_MODULE (loading/unloading)\n");
+    return -EPERM;
+  }
+
+  return 0;
+}
+
 char LICENSE[] SEC("license") = "GPL";
