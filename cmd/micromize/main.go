@@ -36,6 +36,9 @@ const (
 
 func main() {
 	enforce := flag.Bool("enforce", true, "Enforce restrictions")
+	otelEndpoint := flag.String("otel-endpoint", "127.0.0.1:4317", "Endpoint for OTEL exporter")
+	otelInsecure := flag.Bool("otel-insecure", true, "Use insecure connection for OTEL exporter")
+	otelEnabled := flag.Bool("otel-enabled", true, "Enable OTEL exporter")
 	flag.Parse()
 
 	fmt.Println("Starting micromize...")
@@ -68,13 +71,24 @@ func main() {
 	ociHandlerOp := operators.NewOCIHandler()
 	cliOp := operators.NewCLIOperator()
 
+	otelOp, err := operators.NewOtelLogOperator(*otelEndpoint, *otelInsecure)
+	if err != nil {
+		fmt.Printf("creating otel operator: %v", err)
+		os.Exit(1)
+	}
+
 	localManagerOp, err := operators.NewLocalManager()
 	if err != nil {
 		fmt.Printf("creating local manager operator: %v", err)
 		os.Exit(1)
 	}
 
-	contextManager := gadget.NewContextManager([]operators.DataOperator{ociHandlerOp, localManagerOp, cliOp})
+	ops := []operators.DataOperator{ociHandlerOp, localManagerOp, cliOp}
+	if *otelEnabled {
+		ops = append(ops, otelOp)
+	}
+
+	contextManager := gadget.NewContextManager(ops)
 
 	// Create gadget registry
 	registry := gadget.NewRegistry(contextManager, runtimeManager)
